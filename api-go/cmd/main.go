@@ -19,9 +19,10 @@ import (
 )
 
 var (
-	db          *gorm.DB
-	redisClient *redis.Client
-	scrapingSvc *services.ScrapingService
+	db            *gorm.DB
+	redisClient  *redis.Client
+	scrapingSvc  *services.ScrapingService
+	schedulerSvc *services.SchedulerService
 )
 
 func initDB() {
@@ -58,6 +59,7 @@ func initRedis() {
 
 func initServices() {
 	scrapingSvc = services.NewScrapingService(db, redisClient)
+	schedulerSvc = services.NewSchedulerService(db, redisClient)
 }
 
 func main() {
@@ -65,6 +67,14 @@ func main() {
 	initDB()
 	initRedis()
 	initServices()
+
+	// Initialize scheduler for existing pages
+	if err := schedulerSvc.InitializeScheduledPages(); err != nil {
+		log.Printf("⚠️  Scheduler: failed to initialize pages: %v", err)
+	}
+
+	// Start scheduler in background
+	go schedulerSvc.Start()
 
 	r := gin.Default()
 
