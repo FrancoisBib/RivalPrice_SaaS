@@ -1,192 +1,221 @@
-RivalPrice, une plateforme de veille stratégique dédiée aux fondateurs de SaaS. L'outil automatise la surveillance de vos concurrents : de l'évolution des tarifs au déploiement de nouvelles fonctionnalités. Avec RivalPrice, vous ne vous laissez plus surprendre par le marché ; vous gardez toujours une longueur d'avance. Grâce à l'IA, nous ne nous contentons pas de surveiller vos rivaux : nous analysons leurs changements de prix, décryptons leurs nouvelles fonctionnalités et résumons leur stratégie pour vous. Ne recevez plus des alertes, recevez des plans d'action.
+# RivalPrice 🦁
 
-🎯 Architecture ajustée
-🔹 API Backend → Go
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python)
+![Next.js](https://img.shields.io/badge/Next.js-14+-000000?style=flat&logo=next.js)
 
-✅ API REST en Go
+> **Français** | English
 
-Frameworks recommandés :
+**RivalPrice** est une plateforme de veille stratégique dédiée aux fondateurs de SaaS. L'outil automatise la surveillance de vos concurrents : de l'évolution des tarifs au déploiement de nouvelles fonctionnalités. Avec RivalPrice, vous ne vous laissez plus surprendre par le marché ; vous gardez toujours une longueur d'avance.
 
-Gin (mature, simple)
+---
 
-Fiber (très rapide, DX moderne)
+## English Description
 
-Echo (solide et structuré)
+**RivalPrice** is a strategic intelligence platform designed for SaaS founders. The tool automates competitor monitoring—from pricing evolution to new feature deployments. With RivalPrice, you'll never be surprised by the market again; you'll always stay one step ahead.
 
-🔹 Python pour :
+Thanks to AI, we don't just monitor your rivals: we analyze their pricing changes, decode their new features, and summarize their strategy for you. Stop receiving alerts; start receiving action plans.
 
-AI Strategic Engine
+---
 
-Analyse LLM
+## 🚀 Features
 
-Génération des plans d’action
+- **🔍 Automated Scraping** - Schedule and monitor competitor websites
+- **💰 Price Tracking** - Monitor pricing changes in real-time
+- **✨ Feature Monitoring** - Detect new features and changes
+- **🤖 AI-Powered Analysis** - LLM-powered strategic insights
+- **📊 Action Plans** - Get actionable recommendations
+- **🔔 Smart Alerts** - Customizable notifications
+- **📈 Dashboard** - Beautiful Next.js interface
 
-🏗 Nouvelle structure
+---
 
-Frontend (Next.js)
-        ↓
-API Backend (Go)
-        ↓
-PostgreSQL
-        ↓
-Redis (queue)
-        ↓
-Scraper Workers (Go)
-        ↓
-AI Engine (Python)
+## 🏗️ Architecture
 
-✅ Avantages de remplacer FastAPI
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Frontend  │────▶│  API (Go)   │────▶│  PostgreSQL │
+│  (Next.js)  │     │    Gin     │     │             │
+└─────────────┘     └─────────────┘     └─────────────┘
+                           │                   │
+                           ▼                   ▼
+                    ┌─────────────┐     ┌─────────────┐
+                    │    Redis    │◀────│   Scrapers  │
+                    │   (Queue)   │     │   (Workers) │
+                    └─────────────┘     └─────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │ AI Engine   │
+                    │ (Python)    │
+                    └─────────────┘
+```
 
-API plus performante
+### Tech Stack
 
-Consommation RAM plus faible
+| Component | Technology |
+|-----------|------------|
+| **Backend API** | Go + Gin |
+| **Database** | PostgreSQL |
+| **Cache/Queue** | Redis |
+| **Scrapers** | Go Workers |
+| **AI Engine** | Python + LLM |
+| **Frontend** | Next.js 14+ |
+| **Container** | Docker |
 
-Une seule stack backend (Go) pour :
+---
 
-API
+## 📦 Quick Start
 
-Scraper
+### Prerequisites
 
-Workers
+- Docker & Docker Compose
+- Go 1.21+ (for local development)
+- Python 3.11+ (for AI engine)
+- PostgreSQL 15+
+- Redis 7+
 
-Moins de context switching
+### Installation
 
-⚠️ Points à anticiper
+1. **Clone the repository**
+```bash
+git clone https://github.com/FrancoisBib/RivalPrice_SaaS.git
+cd RivalPrice_SaaS
+```
 
-Validation des requêtes (struct tags + validator)
+2. **Start with Docker**
+```bash
+docker-compose up -d
+```
 
-Gestion ORM (GORM ou sqlc recommandé)
+3. **Environment Variables**
+Create a `.env` file:
+```env
+# Database
+DATABASE_URL=postgres://user:password@localhost:5432/rivalprice?sslmode=disable
 
-Migration DB (golang-migrate)
+# Redis
+REDIS_URL=redis://localhost:6379
 
-Structuration propre dès le départ (hexagonal ou clean architecture)
+# AI Engine
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
 
+# JWT
+JWT_SECRET=your-secret-key
+```
 
+---
 
-Structure de dossier
+## 📁 Project Structure
 
-/RivalPrice_SaaS
+```
+RivalPrice_SaaS/
 │
-├── api-go/                  # Backend principal en Go (Gin)
-│   ├── cmd/                 # Point d’entrée
-│   │   └── main.go
-│   ├── config/              # Config app (DB, Redis)
-│   │   └── config.go
-│   ├── models/              # Modèles GORM
-│   │   └── user.go
-│   │   └── project.go
-│   │   └── competitor.go
-│   │   └── monitored_page.go
-│   │   └── snapshot.go
-│   ├── routes/              # Routes HTTP
-│   │   └── routes.go
-│   ├── controllers/         # Handlers HTTP
-│   │   └── user_controller.go
-│   │   └── project_controller.go
-│   ├── services/            # Logique métier
-│   │   └── task_service.go
-│   ├── utils/               # Helpers, validation
-│   │   └── logger.go
-│   └── go.mod
-│
-├── scraper-go/              # Workers Go pour scraping
+├── api-go/                  # Backend API (Go + Gin)
 │   ├── cmd/
-│   │   └── main.go
+│   │   └── main.go         # Entry point
+│   ├── config/             # Configuration
+│   ├── models/             # GORM models
+│   │   ├── user.go
+│   │   ├── project.go
+│   │   ├── competitor.go
+│   │   ├── monitored_page.go
+│   │   └── snapshot.go
+│   ├── routes/             # HTTP routes
+│   ├── controllers/        # HTTP handlers
+│   ├── services/           # Business logic
+│   └── utils/              # Helpers
+│
+├── scraper-go/             # Scraping workers (Go)
+│   ├── cmd/
 │   ├── workers/
-│   │   └── scraper_worker.go
-│   ├── utils/
-│   │   └── http_client.go
-│   └── go.mod
+│   └── utils/
 │
-├── ai-python/               # AI Engine en Python
-│   ├── main.py
+├── ai-python/              # AI Strategic Engine (Python)
 │   ├── services/
-│   │   └── change_detector.py
+│   │   ├── change_detector.py
 │   │   └── ai_analyzer.py
-│   ├── requirements.txt
+│   └── requirements.txt
 │
-├── frontend/                # Next.js Dashboard
+├── frontend/               # Dashboard (Next.js)
 │   ├── app/
 │   ├── components/
-│   ├── pages/
-│   └── package.json
+│   └── pages/
 │
-├── docker-compose.yml       # PostgreSQL + Redis + API Go + AI Python
-└── README.md
+└── docker-compose.yml      # Full stack orchestration
+```
 
+---
 
-Schéma base de données optimisé pour Go / RivalPrice
+## 🔌 API Endpoints
 
--- USERS
-CREATE TABLE users (
-    id BIGSERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    hashed_password TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
+### Authentication
+- `POST /api/auth/register` - Register new user
+- `POST /api/auth/login` - Login
+- `GET /api/auth/me` - Get current user
 
--- PROJECTS (projets surveillés par les clients)
-CREATE TABLE projects (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES users(id),
-    name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### Projects
+- `GET /api/projects` - List projects
+- `POST /api/projects` - Create project
+- `GET /api/projects/:id` - Get project
+- `PUT /api/projects/:id` - Update project
+- `DELETE /api/projects/:id` - Delete project
 
--- COMPETITORS
-CREATE TABLE competitors (
-    id BIGSERIAL PRIMARY KEY,
-    project_id BIGINT REFERENCES projects(id),
-    name VARCHAR(255) NOT NULL,
-    url VARCHAR(512),
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### Competitors
+- `GET /api/projects/:id/competitors` - List competitors
+- `POST /api/projects/:id/competitors` - Add competitor
+- `GET /api/competitors/:id` - Get competitor
+- `DELETE /api/competitors/:id` - Delete competitor
 
--- MONITORED PAGES
-CREATE TABLE monitored_pages (
-    id BIGSERIAL PRIMARY KEY,
-    competitor_id BIGINT REFERENCES competitors(id),
-    page_type VARCHAR(50), -- pricing / features
-    url VARCHAR(512) NOT NULL,
-    css_selector TEXT, -- optionnel pour ciblage spécifique
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### Monitored Pages
+- `GET /api/competitors/:id/pages` - List monitored pages
+- `POST /api/competitors/:id/pages` - Add page to monitor
+- `DELETE /api/pages/:id` - Stop monitoring
 
--- SNAPSHOTS
-CREATE TABLE snapshots (
-    id BIGSERIAL PRIMARY KEY,
-    monitored_page_id BIGINT REFERENCES monitored_pages(id),
-    snapshot JSONB NOT NULL, -- version complète de la page
-    hash CHAR(64) NOT NULL,  -- hash pour comparaison rapide
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### Snapshots & Analysis
+- `GET /api/pages/:id/snapshots` - List snapshots
+- `GET /api/pages/:id/analysis` - Get AI analysis
 
--- DETECTED CHANGES
-CREATE TABLE detected_changes (
-    id BIGSERIAL PRIMARY KEY,
-    snapshot_id BIGINT REFERENCES snapshots(id),
-    change_type VARCHAR(50), -- price / feature / content
-    description TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+---
 
--- AI ANALYSIS
-CREATE TABLE ai_analysis (
-    id BIGSERIAL PRIMARY KEY,
-    detected_change_id BIGINT REFERENCES detected_changes(id),
-    summary TEXT,
-    impact_score INT,
-    plan_of_action JSONB,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+## 🗄️ Database Schema
 
--- ALERTS
-CREATE TABLE alerts (
-    id BIGSERIAL PRIMARY KEY,
-    project_id BIGINT REFERENCES projects(id),
-    message TEXT,
-    alert_type VARCHAR(50),
-    is_read BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### Tables
+
+- **users** - User accounts
+- **projects** - Customer projects
+- **competitors** - Competitor entries
+- **monitored_pages** - Pages to track
+- **snapshots** - Page snapshots (JSONB)
+- **detected_changes** - Change detection
+- **ai_analysis** - AI-powered insights
+- **alerts** - User notifications
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing`)
+5. Open a Pull Request
+
+---
+
+## 📝 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🦁 Author
+
+**François Bib** 🦁
+- GitHub: [@FrancoisBib](https://github.com/FrancoisBib)
+
+---
+
+*Ne recevez plus des alertes, recevez des plans d'action.*
