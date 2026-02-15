@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -14,11 +15,13 @@ import (
 
 	"github.com/rivalprice/api-go/models"
 	"github.com/rivalprice/api-go/routes"
+	"github.com/rivalprice/api-go/services"
 )
 
 var (
-	db    *gorm.DB
+	db          *gorm.DB
 	redisClient *redis.Client
+	scrapingSvc *services.ScrapingService
 )
 
 func initDB() {
@@ -53,10 +56,15 @@ func initRedis() {
 	log.Println("✅ Redis connected")
 }
 
+func initServices() {
+	scrapingSvc = services.NewScrapingService(db, redisClient)
+}
+
 func main() {
 	// Initialize connections
 	initDB()
 	initRedis()
+	initServices()
 
 	r := gin.Default()
 
@@ -105,6 +113,37 @@ func main() {
 			"status": "migrated",
 			"tables": existingTables,
 		})
+	})
+
+	// Scrape endpoints
+	r.POST("/scrape/page/:id", func(c *gin.Context) {
+		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page ID"})
+			return
+		}
+
+		if err := scrapingSvc.QueueScrapeJob(uint(id)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Scrape job queued", "page_id": id})
+	})
+
+	r.POST("/scrape/project/:id", func(c *gin.Context) {
+		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+			return
+		}
+
+		if err := scrapingSvc.QueueScrapeJobForProject(uint(id)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Scrape jobs queued for project", "project_id": id})
 	})
 
 	// Setup API routes
