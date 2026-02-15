@@ -1,0 +1,104 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: rivalprice-db
+    environment:
+      POSTGRES_USER: rivalprice
+      POSTGRES_PASSWORD: rivalprice_secret
+      POSTGRES_DB: rivalprice
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rivalprice"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Queue
+  redis:
+    image: redis:7-alpine
+    container_name: rivalprice-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Go Backend
+  api-go:
+    build:
+      context: ./api-go
+      dockerfile: Dockerfile
+    container_name: rivalprice-api
+    environment:
+      DATABASE_URL: postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      PORT: 8080
+      JWT_SECRET: your_jwt_secret_key_here
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Scraper Workers Go
+  scraper-go:
+    build:
+      context: ./scraper-go
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  # AI Engine Python
+  ai-python:
+    build:
+      context: ./ai-python
+      dockerfile: Dockerfile
+    container_name: rivalprice-ai
+    environment:
+      DATABASE_URL: postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Frontend Next.js
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rivalprice-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    depends_on:
+      - api-go
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

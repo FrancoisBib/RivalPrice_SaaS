@@ -1,0 +1,51 @@
+# Binaires Go
+api-go/api-go
+api-go/api-go.exe
+api-go/api-go.test
+scraper-go/scraper-go
+scraper-go/scraper-go.exe
+scraper-go/scraper-go.test
+
+# Node_modules (Frontend)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+
+# Python
+ai-python/__pycache__/
+ai-python/*.py[cod]
+ai-python/*$py.class
+ai-python/venv/
+ai-python/.env
+ai-python/.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+dist/
+build/
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Temporary files
+*.tmp
+temp/

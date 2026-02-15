@@ -1,0 +1,29 @@
+# AI Python - RivalPrice
+# AI Strategic Engine pour l'analyse des concurrents
+
+# Core
+openai>=1.3.0
+python-dotenv>=1.0.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Text processing
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Database
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+
+# Redis
+redis>=5.0.0
+
+# Async
+aiohttp>=3.9.0
+asyncio>=3.4.3
+
+# Utilities
+python-dateutil>=2.8.0
+pydantic>=2.0.0
