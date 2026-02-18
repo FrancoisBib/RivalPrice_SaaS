@@ -16,6 +16,7 @@ import (
 	"github.com/rivalprice/api-go/models"
 	"github.com/rivalprice/api-go/routes"
 	"github.com/rivalprice/api-go/services"
+	"github.com/rivalprice/api-go/workers"
 )
 
 var (
@@ -23,6 +24,7 @@ var (
 	redisClient  *redis.Client
 	scrapingSvc  *services.ScrapingService
 	schedulerSvc *services.SchedulerService
+	alertWorker  *workers.AlertWorker
 )
 
 func initDB() {
@@ -41,6 +43,7 @@ func initDB() {
 		&models.Competitor{},
 		&models.MonitoredPage{},
 		&models.Snapshot{},
+		&models.AlertLog{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
@@ -75,6 +78,10 @@ func main() {
 
 	// Start scheduler in background
 	go schedulerSvc.Start()
+
+	// Start alert worker in background (polls every 30s)
+	alertWorker = workers.NewAlertWorker(db)
+	go alertWorker.Start()
 
 	r := gin.Default()
 
