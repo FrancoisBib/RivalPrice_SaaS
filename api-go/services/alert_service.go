@@ -10,12 +10,13 @@ import (
 	"gorm.io/gorm"
 )
 
-// AlertService decides whether to create an alert and persists it
+// AlertService decides whether to create an alert and persists it.
+// Decision is 100% deterministic based on user_notification_settings.
 type AlertService struct {
-	db          *gorm.DB
-	aiClient    *AIClient
-	emailSvc    *EmailService
-	prefSvc     *PreferenceService
+	db       *gorm.DB
+	aiClient *AIClient
+	emailSvc *EmailService
+	prefSvc  *PreferenceService
 }
 
 func NewAlertService(db *gorm.DB) *AlertService {
@@ -52,50 +53,64 @@ func severityFromChange(changeType string, changePercent float64) models.AlertSe
 	}
 }
 
-// shouldAlert returns true if the change warrants an alert
-func shouldAlert(changeType string, severity models.AlertSeverity, minSeverity string) bool {
-	// Always alert on price changes
+// shouldAlert applies deterministic rules from user_notification_settings:
+//  1. change_percent must be >= settings.MinimumChangePercent (for price changes)
+//  2. change type must be enabled in settings
+func shouldAlert(change *models.DetectedChange, settings *models.UserNotificationSettings) (bool, string) {
+	changeType := change.ChangeType
+	abs := math.Abs(change.ChangePercent)
+
+	// Price changes
 	if strings.Contains(changeType, "price_increase") || strings.Contains(changeType, "price_decrease") {
-		return true
-	}
-	// Always alert on feature changes
-	if strings.Contains(changeType, "feature_added") || strings.Contains(changeType, "feature_removed") {
-		return true
+		if !settings.AlertOnPriceChange {
+			return false, "price alerts disabled by user"
+		}
+		if abs < settings.MinimumChangePercent {
+			return false, "change_percent below minimum_change_percent threshold"
+		}
+		return true, ""
 	}
 
-	// For other types, check severity threshold
-	order := map[models.AlertSeverity]int{
-		models.SeverityLow:      1,
-		models.SeverityMedium:   2,
-		models.SeverityHigh:     3,
-		models.SeverityCritical: 4,
+	// Feature changes
+	if strings.Contains(changeType, "feature_added") || strings.Contains(changeType, "feature_removed") {
+		if !settings.AlertOnFeatureChange {
+			return false, "feature alerts disabled by user"
+		}
+		return true, ""
 	}
-	minOrder := order[models.AlertSeverity(minSeverity)]
-	if minOrder == 0 {
-		minOrder = 2 // default: medium
+
+	// Messaging changes
+	if strings.Contains(changeType, "messaging_change") {
+		if !settings.AlertOnMessaging {
+			return false, "messaging alerts disabled by user"
+		}
+		return true, ""
 	}
-	return order[severity] >= minOrder
+
+	// Unknown change type — skip
+	return false, "unknown change type"
 }
 
-// ProcessChange evaluates a detected change, creates an alert if needed, and notifies
+// ProcessChange evaluates a detected change using deterministic rules, then notifies
 func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
-	// 1. Compute severity
-	severity := severityFromChange(change.ChangeType, change.ChangePercent)
-
-	// 2. Get user preferences
-	prefs, err := s.prefSvc.GetPreferencesForPage(change.PageID)
+	// 1. Resolve page → user → notification settings
+	settings, userEmail, err := s.prefSvc.GetSettingsForPage(change.PageID)
 	if err != nil {
 		log.Printf("⚠️  AlertService: preference error for page %d: %v", change.PageID, err)
-		prefs = &AlertPreference{MinSeverity: "medium"}
+		settings = s.prefSvc.defaultSettings()
 	}
 
-	// 3. Decide if alert is needed
-	if !shouldAlert(change.ChangeType, severity, prefs.MinSeverity) {
-		log.Printf("ℹ️  AlertService: change %d skipped (severity=%s below threshold=%s)", change.ID, severity, prefs.MinSeverity)
+	// 2. Deterministic decision
+	ok, reason := shouldAlert(change, settings)
+	if !ok {
+		log.Printf("ℹ️  AlertService: change %d skipped — %s", change.ID, reason)
 		return nil
 	}
 
-	// 4. Enrich with AI
+	// 3. Compute severity
+	severity := severityFromChange(change.ChangeType, change.ChangePercent)
+
+	// 4. Enrich with AI (summary + recommendation)
 	insight, err := s.aiClient.Analyze(
 		change.ChangeType,
 		change.PageType,
@@ -138,25 +153,26 @@ func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
 
 	// 6. Send notifications
 	notified := false
+	channel := "log"
 
-	if prefs.NotifyEmail && prefs.UserEmail != "" {
-		if err := s.emailSvc.SendAlert(prefs.UserEmail, change.ChangeType, string(severity), insight.Summary, insight.Recommendation, change.PageID); err != nil {
+	if settings.NotifyEmail && userEmail != "" {
+		if err := s.emailSvc.SendAlert(userEmail, change.ChangeType, string(severity), insight.Summary, insight.Recommendation, change.PageID); err != nil {
 			log.Printf("⚠️  Email notification failed: %v", err)
 		} else {
 			notified = true
-			alert.NotifyChannel = "email"
+			channel = "email"
 		}
 	}
 
-	if prefs.NotifyWebhook && prefs.WebhookURL != "" {
-		if err := s.emailSvc.SendWebhook(prefs.WebhookURL, change.ChangeType, string(severity), insight.Summary, insight.Recommendation, change.PageID, alert.ID); err != nil {
+	if settings.NotifyWebhook && settings.WebhookURL != "" {
+		if err := s.emailSvc.SendWebhook(settings.WebhookURL, change.ChangeType, string(severity), insight.Summary, insight.Recommendation, change.PageID, alert.ID); err != nil {
 			log.Printf("⚠️  Webhook notification failed: %v", err)
 		} else {
 			notified = true
-			if alert.NotifyChannel == "email" {
-				alert.NotifyChannel = "email,webhook"
+			if channel == "email" {
+				channel = "email,webhook"
 			} else {
-				alert.NotifyChannel = "webhook"
+				channel = "webhook"
 			}
 		}
 	}
@@ -166,7 +182,7 @@ func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
 		s.db.Model(alert).Updates(map[string]interface{}{
 			"notified":       true,
 			"notified_at":    now,
-			"notify_channel": alert.NotifyChannel,
+			"notify_channel": channel,
 		})
 	}
 

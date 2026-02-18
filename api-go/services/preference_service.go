@@ -2,22 +2,12 @@ package services
 
 import (
 	"log"
-	"os"
 
+	"github.com/rivalprice/api-go/models"
 	"gorm.io/gorm"
 )
 
-// AlertPreference holds user notification preferences for a project
-type AlertPreference struct {
-	ProjectID      uint
-	UserEmail      string
-	WebhookURL     string
-	NotifyEmail    bool
-	NotifyWebhook  bool
-	MinSeverity    string // low, medium, high, critical
-}
-
-// PreferenceService retrieves alert preferences for a project/user
+// PreferenceService loads user notification settings from DB
 type PreferenceService struct {
 	db *gorm.DB
 }
@@ -26,17 +16,17 @@ func NewPreferenceService(db *gorm.DB) *PreferenceService {
 	return &PreferenceService{db: db}
 }
 
-// GetPreferencesForPage returns alert preferences for the project owning a page
-// For now returns defaults from env vars; can be extended to DB-backed preferences
-func (s *PreferenceService) GetPreferencesForPage(pageID int) (*AlertPreference, error) {
-	// Try to resolve project from page → competitor → project
+// GetSettingsForPage resolves the user owning the page and returns their notification settings.
+// Chain: monitored_page → competitor → project → user → user_notification_settings
+func (s *PreferenceService) GetSettingsForPage(pageID int) (*models.UserNotificationSettings, string, error) {
+	// Resolve user email and user_id from page
 	type row struct {
-		ProjectID uint
-		Email     string
+		UserID uint
+		Email  string
 	}
 	var r row
 	err := s.db.Raw(`
-		SELECT p.id AS project_id, u.email
+		SELECT u.id AS user_id, u.email
 		FROM monitored_pages mp
 		JOIN competitors c ON mp.competitor_id = c.id
 		JOIN projects p ON c.project_id = p.id
@@ -45,27 +35,42 @@ func (s *PreferenceService) GetPreferencesForPage(pageID int) (*AlertPreference,
 		LIMIT 1
 	`, pageID).Scan(&r).Error
 
-	if err != nil || r.ProjectID == 0 {
-		log.Printf("⚠️  PreferenceService: could not resolve project for page %d, using defaults", pageID)
-		return s.defaultPreferences(), nil
+	if err != nil || r.UserID == 0 {
+		log.Printf("⚠️  PreferenceService: cannot resolve user for page %d, using defaults", pageID)
+		return s.defaultSettings(), "", nil
 	}
 
-	return &AlertPreference{
-		ProjectID:     r.ProjectID,
-		UserEmail:     r.Email,
-		WebhookURL:    os.Getenv("ALERT_WEBHOOK_URL"),
-		NotifyEmail:   true,
-		NotifyWebhook: os.Getenv("ALERT_WEBHOOK_URL") != "",
-		MinSeverity:   "medium",
-	}, nil
+	// Load notification settings for this user
+	var settings models.UserNotificationSettings
+	err = s.db.Where("user_id = ?", r.UserID).First(&settings).Error
+	if err != nil {
+		// No settings row yet → create defaults
+		log.Printf("ℹ️  PreferenceService: no settings for user %d, creating defaults", r.UserID)
+		settings = models.UserNotificationSettings{
+			UserID:               r.UserID,
+			NotifyEmail:          true,
+			NotifyWebhook:        false,
+			MinimumChangePercent: 5.0,
+			AlertOnPriceChange:   true,
+			AlertOnFeatureChange: true,
+			AlertOnMessaging:     false,
+		}
+		if createErr := s.db.Create(&settings).Error; createErr != nil {
+			log.Printf("⚠️  PreferenceService: failed to create default settings: %v", createErr)
+		}
+	}
+
+	return &settings, r.Email, nil
 }
 
-func (s *PreferenceService) defaultPreferences() *AlertPreference {
-	return &AlertPreference{
-		UserEmail:     os.Getenv("ALERT_DEFAULT_EMAIL"),
-		WebhookURL:    os.Getenv("ALERT_WEBHOOK_URL"),
-		NotifyEmail:   os.Getenv("ALERT_DEFAULT_EMAIL") != "",
-		NotifyWebhook: os.Getenv("ALERT_WEBHOOK_URL") != "",
-		MinSeverity:   "medium",
+// defaultSettings returns safe defaults when user cannot be resolved
+func (s *PreferenceService) defaultSettings() *models.UserNotificationSettings {
+	return &models.UserNotificationSettings{
+		NotifyEmail:          false,
+		NotifyWebhook:        false,
+		MinimumChangePercent: 5.0,
+		AlertOnPriceChange:   true,
+		AlertOnFeatureChange: true,
+		AlertOnMessaging:     false,
 	}
 }

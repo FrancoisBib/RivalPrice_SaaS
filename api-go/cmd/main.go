@@ -44,6 +44,7 @@ func initDB() {
 		&models.MonitoredPage{},
 		&models.Snapshot{},
 		&models.AlertLog{},
+		&models.UserNotificationSettings{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)

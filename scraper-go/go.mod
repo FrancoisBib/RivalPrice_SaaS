@@ -1,4 +1,4 @@
-module github.com/rivalprice/scraper-go
+
 
 go 1.22
 
