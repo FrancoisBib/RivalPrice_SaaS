@@ -1,0 +1,7 @@
+{
+  "include": ["models", "services"],
+  "exclude": ["__pycache__", ".*", "venv"],
+  "venvPath": ".",
+  "pythonVersion": "3.12",
+  "extraPaths": ["/home/francois-bib-777/.local/lib/python3.12/site-packages"]
+}
