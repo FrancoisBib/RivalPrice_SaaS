@@ -19,8 +19,17 @@ type AlertLog struct {
 	PageID         int           `gorm:"column:page_id;not null;index" json:"page_id"`
 	AlertType      string        `gorm:"column:alert_type;type:varchar(50);not null" json:"alert_type"` // price_increase, price_decrease, feature_added, etc.
 	Severity       AlertSeverity `gorm:"column:severity;type:varchar(20);not null" json:"severity"`
-	Summary        string        `gorm:"column:summary;type:text" json:"summary"`
-	Recommendation string        `gorm:"column:recommendation;type:varchar(500)" json:"recommendation"`
+	// Factual data (always present, never AI-generated)
+	OldPrice       string        `gorm:"column:old_price;type:varchar(50)" json:"old_price"`
+	NewPrice       string        `gorm:"column:new_price;type:varchar(50)" json:"new_price"`
+	ChangePercent  float64       `gorm:"column:change_percent" json:"change_percent"`
+	// AI-generated enrichment
+	AISummary      string        `gorm:"column:ai_summary;type:text" json:"ai_summary"`
+	AIRecommendation string      `gorm:"column:ai_recommendation;type:varchar(500)" json:"ai_recommendation"`
+	ImpactLevel    int           `gorm:"column:impact_level;default:0" json:"impact_level"` // 1-10 score from AI
+	AIModel        string        `gorm:"column:ai_model;type:varchar(50)" json:"ai_model"`
+	// Full assembled message (factual + AI)
+	Message        string        `gorm:"column:message;type:text" json:"message"`
 	Notified       bool          `gorm:"column:notified;default:false" json:"notified"`
 	NotifiedAt     *time.Time    `gorm:"column:notified_at" json:"notified_at"`
 	NotifyChannel  string        `gorm:"column:notify_channel;type:varchar(50)" json:"notify_channel"` // email, webhook, log

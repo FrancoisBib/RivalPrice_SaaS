@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"strings"
@@ -53,9 +54,7 @@ func severityFromChange(changeType string, changePercent float64) models.AlertSe
 	}
 }
 
-// shouldAlert applies deterministic rules from user_notification_settings:
-//  1. change_percent must be >= settings.MinimumChangePercent (for price changes)
-//  2. change type must be enabled in settings
+// shouldAlert applies deterministic rules from user_notification_settings
 func shouldAlert(change *models.DetectedChange, settings *models.UserNotificationSettings) (bool, string) {
 	changeType := change.ChangeType
 	abs := math.Abs(change.ChangePercent)
@@ -87,8 +86,36 @@ func shouldAlert(change *models.DetectedChange, settings *models.UserNotificatio
 		return true, ""
 	}
 
-	// Unknown change type — skip
 	return false, "unknown change type"
+}
+
+// buildAlertMessage assembles factual data + AI summary + recommendation
+func buildAlertMessage(change *models.DetectedChange, insight *AIInsight) string {
+	var msg strings.Builder
+
+	// Section 1: Factual data (always present)
+	msg.WriteString("=== DONNÉES FACTUELLES ===\n")
+	if change.OldPrice != "" && change.NewPrice != "" {
+		msg.WriteString(fmt.Sprintf("Prix: %s → %s (%.1f%%)\n", change.OldPrice, change.NewPrice, change.ChangePercent))
+	}
+	msg.WriteString(fmt.Sprintf("Type de changement: %s\n", change.ChangeType))
+	msg.WriteString(fmt.Sprintf("Page ID: %d\n", change.PageID))
+	msg.WriteString("\n")
+
+	// Section 2: AI Summary
+	if insight.Summary != "" {
+		msg.WriteString("=== ANALYSE IA ===\n")
+		msg.WriteString(insight.Summary + "\n")
+		msg.WriteString("\n")
+	}
+
+	// Section 3: AI Recommendation
+	if insight.Recommendation != "" {
+		msg.WriteString("=== RECOMMANDATION ===\n")
+		msg.WriteString(insight.Recommendation + "\n")
+	}
+
+	return msg.String()
 }
 
 // ProcessChange evaluates a detected change using deterministic rules, then notifies
@@ -110,7 +137,7 @@ func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
 	// 3. Compute severity
 	severity := severityFromChange(change.ChangeType, change.ChangePercent)
 
-	// 4. Enrich with AI (summary + recommendation)
+	// 4. Enrich with AI (summary + recommendation + impact_level)
 	insight, err := s.aiClient.Analyze(
 		change.ChangeType,
 		change.PageType,
@@ -126,21 +153,31 @@ func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
 		insight = &AIInsight{
 			Summary:        "Competitor change detected: " + change.ChangeType,
 			Recommendation: "Review competitor activity",
-			Model:          "rule-based",
+			Model:         "rule-based",
+			ImpactLevel:   5,
 		}
 	}
 
-	// 5. Persist alert log
+	// 5. Build full alert message (factual + AI)
+	message := buildAlertMessage(change, insight)
+
+	// 6. Persist alert log
 	now := time.Now()
 	alert := &models.AlertLog{
-		ChangeID:       change.ID,
-		PageID:         change.PageID,
-		AlertType:      change.ChangeType,
-		Severity:       severity,
-		Summary:        insight.Summary,
-		Recommendation: insight.Recommendation,
-		Notified:       false,
-		NotifyChannel:  "log",
+		ChangeID:        change.ID,
+		PageID:          change.PageID,
+		AlertType:       change.ChangeType,
+		Severity:        severity,
+		OldPrice:        change.OldPrice,
+		NewPrice:        change.NewPrice,
+		ChangePercent:   change.ChangePercent,
+		AISummary:       insight.Summary,
+		AIRecommendation: insight.Recommendation,
+		ImpactLevel:     insight.ImpactLevel,
+		AIModel:         insight.Model,
+		Message:         message,
+		Notified:        false,
+		NotifyChannel:   "log",
 	}
 
 	if err := s.db.Create(alert).Error; err != nil {
@@ -148,10 +185,10 @@ func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
 		return err
 	}
 
-	log.Printf("🚨 Alert created [%s] change=%d page=%d severity=%s | %s",
-		change.ChangeType, change.ID, change.PageID, severity, insight.Summary)
+	log.Printf("🚨 Alert created [%s] change=%d page=%d severity=%s impact=%d | %s",
+		change.ChangeType, change.ID, change.PageID, severity, insight.ImpactLevel, insight.Summary)
 
-	// 6. Send notifications
+	// 7. Send notifications
 	notified := false
 	channel := "log"
 
@@ -165,7 +202,7 @@ func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
 	}
 
 	if settings.NotifyWebhook && settings.WebhookURL != "" {
-		if err := s.emailSvc.SendWebhook(settings.WebhookURL, change.ChangeType, string(severity), insight.Summary, insight.Recommendation, change.PageID, alert.ID); err != nil {
+		if err := s.emailSvc.SendWebhook(settings.WebhookURL, change.ChangeType, string(severity), message, insight.Recommendation, change.PageID, alert.ID); err != nil {
 			log.Printf("⚠️  Webhook notification failed: %v", err)
 		} else {
 			notified = true
@@ -177,12 +214,12 @@ func (s *AlertService) ProcessChange(change *models.DetectedChange) error {
 		}
 	}
 
-	// 7. Mark as notified
+	// 8. Mark as notified
 	if notified {
 		s.db.Model(alert).Updates(map[string]interface{}{
-			"notified":       true,
-			"notified_at":    now,
-			"notify_channel": channel,
+			"notified":        true,
+			"notified_at":     now,
+			"notify_channel":   channel,
 		})
 	}
 
