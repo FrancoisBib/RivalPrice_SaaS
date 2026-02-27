@@ -3,11 +3,12 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/rivalprice/api-go/controllers"
+	"github.com/rivalprice/api-go/middleware"
 	"github.com/rivalprice/api-go/services"
 	"gorm.io/gorm"
 )
 
-func SetupRoutes(r *gin.Engine, db *gorm.DB) {
+func SetupRoutes(r *gin.Engine, db *gorm.DB, jwtSecret string) {
 	// Initialize services
 	userService := services.NewUserService(db)
 	projectService := services.NewProjectService(db)
@@ -19,10 +20,26 @@ func SetupRoutes(r *gin.Engine, db *gorm.DB) {
 	projectController := controllers.NewProjectController(projectService)
 	competitorController := controllers.NewCompetitorController(competitorService)
 	monitoredPageController := controllers.NewMonitoredPageController(monitoredPageService)
+	authController := controllers.NewAuthController(userService, jwtSecret)
 
-	// API v1 group
-	v1 := r.Group("/api/v1")
+	// Public routes (no auth required)
+	public := r.Group("/api/v1")
 	{
+		// Auth
+		auth := public.Group("/auth")
+		{
+			auth.POST("/login", authController.Login)
+			auth.POST("/register", authController.Register)
+		}
+	}
+
+	// Protected routes (auth required)
+	v1 := r.Group("/api/v1")
+	v1.Use(middleware.JWTAuthMiddleware(jwtSecret))
+	{
+		// Auth (protected)
+		v1.GET("/auth/me", authController.Me)
+
 		// Users
 		users := v1.Group("/users")
 		{

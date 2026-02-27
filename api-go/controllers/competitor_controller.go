@@ -1,11 +1,14 @@
 package controllers
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rivalprice/api-go/models"
 	"github.com/rivalprice/api-go/services"
+	"github.com/rivalprice/api-go/utils"
 )
 
 type CompetitorController struct {
@@ -44,29 +47,47 @@ func (c *CompetitorController) CreateCompetitor(ctx *gin.Context) {
 
 // ListCompetitors - GET /competitors
 func (c *CompetitorController) ListCompetitors(ctx *gin.Context) {
+	// Get pagination params
+	pagination := utils.GetPaginationParams(ctx)
+	
+	var competitors []models.Competitor
+	var total int64
+	var err error
+	
 	// Optional: filter by project_id
 	projectID := ctx.Query("project_id")
 	if projectID != "" {
-		pid, err := strconv.ParseUint(projectID, 10, 32)
-		if err == nil {
-			competitors, err := c.competitorService.GetCompetitorsByProjectID(uint(pid))
-			if err != nil {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch competitors"})
-				return
-			}
-			ctx.JSON(http.StatusOK, gin.H{"competitors": competitors})
+		pid, parseErr := strconv.ParseUint(projectID, 10, 32)
+		if parseErr == nil {
+			competitors, total, err = c.competitorService.GetCompetitorsByProjectIDPaginated(uint(pid), pagination.Offset, pagination.PageSize)
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project_id"})
 			return
 		}
+	} else {
+		competitors, total, err = c.competitorService.GetAllCompetitorsPaginated(pagination.Offset, pagination.PageSize)
 	}
-
-	competitors, err := c.competitorService.GetAllCompetitors()
+	
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch competitors"})
 		return
 	}
 
+	totalPages := int(math.Ceil(float64(total) / float64(pagination.PageSize)))
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"competitors": competitors,
+		"pagination": gin.H{
+			"current_page": pagination.Page,
+			"page_size":    pagination.PageSize,
+			"total_pages":  totalPages,
+			"total_count":  total,
+			"has_next":     pagination.Page < totalPages,
+			"has_previous": pagination.Page > 1,
+		},
 	})
 }
 

@@ -4,18 +4,20 @@ services:
     image: postgres:15-alpine
     container_name: rivalprice-db
     environment:
-      POSTGRES_USER: rivalprice
-      POSTGRES_PASSWORD: rivalprice_secret
-      POSTGRES_DB: rivalprice
+      POSTGRES_USER: ${POSTGRES_USER:-rivalprice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rivalprice_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-rivalprice}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rivalprice"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rivalprice}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - rivalprice-network
 
   # Redis Queue
   redis:
@@ -30,6 +32,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - rivalprice-network
 
   # API Go Backend
   api-go:
@@ -38,18 +42,22 @@ services:
       dockerfile: Dockerfile
     container_name: rivalprice-api
     environment:
-      DATABASE_URL: postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable
-      REDIS_URL: redis://redis:6379
-      PORT: 8080
-      JWT_SECRET: your_jwt_secret_key_here
+      DATABASE_URL: ${DATABASE_URL:-postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      PORT: ${API_PORT:-8080}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required. Run: export JWT_SECRET=$(openssl rand -hex 32)}
+      ENV: ${ENV:-production}
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:${API_PORT:-8080}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - rivalprice-network
 
   # Scraper Workers Go
   scraper-go:
@@ -57,8 +65,9 @@ services:
       context: ./scraper-go
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:-postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,6 +76,8 @@ services:
     restart: unless-stopped
     deploy:
       replicas: 2
+    networks:
+      - rivalprice-network
 
   # AI Engine Python
   ai-python:
@@ -75,8 +86,8 @@ services:
       dockerfile: Dockerfile
     container_name: rivalprice-ai
     environment:
-      DATABASE_URL: postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:-postgres://rivalprice:rivalprice_secret@postgres:5432/rivalprice?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       postgres:
@@ -84,6 +95,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - rivalprice-network
 
   # Frontend Next.js
   frontend:
@@ -92,13 +105,19 @@ services:
       dockerfile: Dockerfile
     container_name: rivalprice-frontend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
     depends_on:
       - api-go
     restart: unless-stopped
+    networks:
+      - rivalprice-network
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  rivalprice-network:
+    driver: bridge

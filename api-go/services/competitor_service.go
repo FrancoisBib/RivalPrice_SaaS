@@ -49,6 +49,35 @@ func (s *CompetitorService) GetCompetitorByID(id uint) (*models.Competitor, erro
 	return &competitor, nil
 }
 
+func (s *CompetitorService) GetAllCompetitorsPaginated(offset, limit int) ([]models.Competitor, int64, error) {
+	var competitors []models.Competitor
+	var total int64
+	
+	if err := s.db.Model(&models.Competitor{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	
+	if err := s.db.Preload("Project").Offset(offset).Limit(limit).Find(&competitors).Error; err != nil {
+		return nil, 0, err
+	}
+	return competitors, total, nil
+}
+
+func (s *CompetitorService) GetCompetitorsByProjectIDPaginated(projectID uint, offset, limit int) ([]models.Competitor, int64, error) {
+	var competitors []models.Competitor
+	var total int64
+	
+	if err := s.db.Model(&models.Competitor{}).Where("project_id = ?", projectID).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	
+	if err := s.db.Where("project_id = ?", projectID).Offset(offset).Limit(limit).Find(&competitors).Error; err != nil {
+		return nil, 0, err
+	}
+	return competitors, total, nil
+}
+
+// Deprecated: Use GetAllCompetitorsPaginated instead
 func (s *CompetitorService) GetAllCompetitors() ([]models.Competitor, error) {
 	var competitors []models.Competitor
 	if err := s.db.Preload("Project").Find(&competitors).Error; err != nil {
@@ -57,6 +86,7 @@ func (s *CompetitorService) GetAllCompetitors() ([]models.Competitor, error) {
 	return competitors, nil
 }
 
+// Deprecated: Use GetCompetitorsByProjectIDPaginated instead
 func (s *CompetitorService) GetCompetitorsByProjectID(projectID uint) ([]models.Competitor, error) {
 	var competitors []models.Competitor
 	if err := s.db.Where("project_id = ?", projectID).Find(&competitors).Error; err != nil {

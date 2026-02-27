@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +12,8 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/rivalprice/api-go/config"
+	"github.com/rivalprice/api-go/middleware"
 	"github.com/rivalprice/api-go/models"
 	"github.com/rivalprice/api-go/routes"
 	"github.com/rivalprice/api-go/services"
@@ -21,16 +22,16 @@ import (
 
 var (
 	db            *gorm.DB
-	redisClient  *redis.Client
-	scrapingSvc  *services.ScrapingService
-	schedulerSvc *services.SchedulerService
-	alertWorker  *workers.AlertWorker
+	redisClient   *redis.Client
+	scrapingSvc   *services.ScrapingService
+	schedulerSvc  *services.SchedulerService
+	alertWorker   *workers.AlertWorker
+	appConfig     *config.Config
 )
 
-func initDB() {
-	dsn := "host=localhost user=rivalprice password=rivalprice_secret dbname=rivalprice port=5432 sslmode=disable"
+func initDB(cfg *config.Config) {
 	var err error
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err = gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -52,12 +53,19 @@ func initDB() {
 	log.Println("✅ Database migrated successfully")
 }
 
-func initRedis() {
+func initRedis(cfg *config.Config) {
 	redisClient = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+		Addr:     cfg.RedisAddr,
+		Password: cfg.RedisPass,
+		DB:       cfg.RedisDB,
 	})
+	
+	// Test connection
+	_, err := redisClient.Ping(context.Background()).Result()
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	
 	log.Println("✅ Redis connected")
 }
 
@@ -67,9 +75,17 @@ func initServices() {
 }
 
 func main() {
+	// Load configuration
+	appConfig = config.Load()
+	if err := appConfig.Validate(); err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+	
+	log.Printf("🚀 Starting RivalPrice API in %s mode", appConfig.Environment)
+
 	// Initialize connections
-	initDB()
-	initRedis()
+	initDB(appConfig)
+	initRedis(appConfig)
 	initServices()
 
 	// Initialize scheduler for existing pages
@@ -84,16 +100,26 @@ func main() {
 	alertWorker = workers.NewAlertWorker(db)
 	go alertWorker.Start()
 
+	// Setup Gin
+	if appConfig.IsProduction() {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	
 	r := gin.Default()
 
-	// Health check endpoint
+	// Apply global middleware
+	r.Use(middleware.StandardRateLimit())       // Rate limiting: 100 req/min
+	r.Use(middleware.JWTAuthMiddleware(appConfig.JWTSecret)) // JWT authentication
+
+	// Health check endpoint (public)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
+			"env":    appConfig.Environment,
 		})
 	})
 
-	// Database status endpoint
+	// Database status endpoint (public)
 	r.GET("/db/status", func(c *gin.Context) {
 		sqlDB, err := db.DB()
 		if err != nil {
@@ -107,7 +133,7 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "connected", "database": "postgres"})
 	})
 
-	// Redis status endpoint
+	// Redis status endpoint (public)
 	r.GET("/redis/status", func(c *gin.Context) {
 		_, err := redisClient.Ping(context.Background()).Result()
 		if err != nil {
@@ -117,9 +143,9 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "connected", "redis": "ok"})
 	})
 
-	// Migration status endpoint
+	// Migration status endpoint (public)
 	r.GET("/migrate", func(c *gin.Context) {
-		tables := []string{"users", "projects", "competitors", "monitored_pages", "snapshots"}
+		tables := []string{"users", "projects", "competitors", "monitored_pages", "snapshots", "alert_logs", "user_notification_settings"}
 		var existingTables []string
 		
 		for _, table := range tables {
@@ -128,51 +154,52 @@ func main() {
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status": "migrated",
-			"tables": existingTables,
+			"status":  "migrated",
+			"tables":  existingTables,
+			"count":   len(existingTables),
 		})
 	})
 
-	// Scrape endpoints
-	r.POST("/scrape/page/:id", func(c *gin.Context) {
-		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page ID"})
-			return
-		}
+	// Scrape endpoints with stricter rate limiting
+	scrapeGroup := r.Group("/scrape")
+	scrapeGroup.Use(middleware.StrictRateLimit()) // 10 req/min for scraping
+	{
+		scrapeGroup.POST("/page/:id", func(c *gin.Context) {
+			id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid page ID"})
+				return
+			}
 
-		if err := scrapingSvc.QueueScrapeJob(uint(id)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+			if err := scrapingSvc.QueueScrapeJob(uint(id)); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Scrape job queued", "page_id": id})
-	})
+			c.JSON(http.StatusOK, gin.H{"message": "Scrape job queued", "page_id": id})
+		})
 
-	r.POST("/scrape/project/:id", func(c *gin.Context) {
-		id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
-			return
-		}
+		scrapeGroup.POST("/project/:id", func(c *gin.Context) {
+			id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+				return
+			}
 
-		if err := scrapingSvc.QueueScrapeJobForProject(uint(id)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+			if err := scrapingSvc.QueueScrapeJobForProject(uint(id)); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Scrape jobs queued for project", "project_id": id})
-	})
-
-	// Setup API routes
-	routes.SetupRoutes(r, db)
-
-	// Get port from env or default to 8080
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+			c.JSON(http.StatusOK, gin.H{"message": "Scrape jobs queued for project", "project_id": id})
+		})
 	}
 
-	fmt.Printf("🚀 Server starting on port %s\n", port)
-	r.Run(":" + port)
+	// Setup API routes
+	routes.SetupRoutes(r, db, appConfig.JWTSecret)
+
+	fmt.Printf("🚀 Server starting on port %s\n", appConfig.Port)
+	if err := r.Run(":" + appConfig.Port); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

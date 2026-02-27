@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,15 +21,67 @@ import (
 )
 
 var (
-	db          *gorm.DB
-	redisClient *redis.Client
-	httpClient  *http.Client
+	db           *gorm.DB
+	redisClient  *redis.Client
+	httpClient   *http.Client
+	
+	// Pre-compiled regex patterns for price extraction
+	pricePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`\$[\d,]+\.?\d*`),
+		regexp.MustCompile(`USD\s*[\d,]+\.?\d*`),
+		regexp.MustCompile(`€[\d,]+\.?\d*`),
+		regexp.MustCompile(`EUR\s*[\d,]+\.?\d*`),
+		regexp.MustCompile(`£[\d,]+\.?\d*`),
+		regexp.MustCompile(`GBP\s*[\d,]+\.?\d*`),
+		regexp.MustCompile(`data-price="([^"]+)"`),
+		regexp.MustCompile(`class="[^"]*price[^"]*"[^>]*>[\s]*([^<]+)`),
+		regexp.MustCompile(`"price"\s*:\s*"([^"]+)"`),
+	}
+	
+	// Pre-compiled regex for title extraction
+	titleRegex = regexp.MustCompile(`<title>([^<]+)</title>`)
 )
 
-func initDB() {
-	dsn := "host=localhost user=rivalprice password=rivalprice_secret dbname=rivalprice port=5432 sslmode=disable"
+// Config holds scraper configuration
+type Config struct {
+	DatabaseURL string
+	RedisAddr   string
+	RedisPass   string
+	RedisDB     int
+}
+
+// LoadConfig loads configuration from environment variables
+func LoadConfig() *Config {
+	return &Config{
+		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=rivalprice password=rivalprice_secret dbname=rivalprice port=5432 sslmode=disable"),
+		RedisAddr:   getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPass:   getEnv("REDIS_PASSWORD", ""),
+		RedisDB:     getEnvAsInt("REDIS_DB", 0),
+	}
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvAsInt(key string, defaultValue int) int {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultValue
+	}
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		return defaultValue
+	}
+	return value
+}
+
+func initDB(cfg *Config) {
 	var err error
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err = gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -40,12 +94,19 @@ func initDB() {
 	log.Println("✅ Database migrated")
 }
 
-func initRedis() {
+func initRedis(cfg *Config) {
 	redisClient = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
+		Addr:     cfg.RedisAddr,
+		Password: cfg.RedisPass,
+		DB:       cfg.RedisDB,
 	})
+	
+	// Test connection
+	_, err := redisClient.Ping(context.Background()).Result()
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	
 	log.Println("✅ Redis connected")
 }
 
@@ -63,21 +124,7 @@ type ScrapeJob struct {
 }
 
 func extractPrice(html string) string {
-	// Common price patterns
-	patterns := []string{
-		`\$[\d,]+\.?\d*`,
-		`USD\s*[\d,]+\.?\d*`,
-		`€[\d,]+\.?\d*`,
-		`EUR\s*[\d,]+\.?\d*`,
-		`£[\d,]+\.?\d*`,
-		`GBP\s*[\d,]+\.?\d*`,
-		`data-price="([^"]+)"`,
-		`class="[^"]*price[^"]*"[^>]*>[\s]*([^<]+)`,
-		`"price"\s*:\s*"([^"]+)"`,
-	}
-
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range pricePatterns {
 		matches := re.FindStringSubmatch(html)
 		if len(matches) > 1 {
 			return strings.TrimSpace(matches[1])
@@ -103,6 +150,16 @@ func extractAvailability(html string) string {
 	}
 	
 	return "available"
+}
+
+// mustJson marshals v to JSON, returns empty bytes on error (with logging)
+func mustJson(v interface{}) []byte {
+	data, err := json.Marshal(v)
+	if err != nil {
+		log.Printf("❌ Failed to marshal JSON: %v", err)
+		return []byte("{}")
+	}
+	return data
 }
 
 func processScrapeJob(ctx context.Context, job ScrapeJob) error {
@@ -131,9 +188,8 @@ func processScrapeJob(ctx context.Context, job ScrapeJob) error {
 	price := extractPrice(html)
 	availability := extractAvailability(html)
 
-	// Extract title from HTML
-	titleRe := regexp.MustCompile(`<title>([^<]+)</title>`)
-	titleMatch := titleRe.FindStringSubmatch(html)
+	// Extract title from HTML using pre-compiled regex
+	titleMatch := titleRegex.FindStringSubmatch(html)
 	title := ""
 	if len(titleMatch) > 1 {
 		title = strings.TrimSpace(titleMatch[1])
@@ -164,14 +220,11 @@ func processScrapeJob(ctx context.Context, job ScrapeJob) error {
 	return nil
 }
 
-func mustJson(v interface{}) []byte {
-	data, _ := json.Marshal(v)
-	return data
-}
-
 func main() {
-	initDB()
-	initRedis()
+	cfg := LoadConfig()
+	
+	initDB(cfg)
+	initRedis(cfg)
 	initHTTP()
 
 	log.Println("🚀 Worker started, waiting for jobs...")
